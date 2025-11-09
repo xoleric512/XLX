@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Slime — single-file</title>
+  <style>
+    /* CodePen CSS -> shu yerda */
+    html, body {
+      height: 100%;
+    }
+    body {
+      margin: 0;
+      overflow: hidden;
+      touch-action: none;
+      background: #000; /* qora fon (CodePen JS bo'sh qoldiradi) */
+    }
+
+    /* canvas to'liq ekranni egallaydi */
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+
+  <script>
+    // CodePen JS -> moslab olindi (canvas elementni aniq olish va resize qilingan)
+    (function () {
+      const { sin, cos, abs, PI, hypot, max, min } = Math;
+
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+
+      let w = 0;
+      let h = 0;
+
+      function resize() {
+        // devicePixelRatio bilan yuqori DPI uchun moslashamiz
+        const dpr = Math.max(1, window.devicePixelRatio || 1);
+        const cssW = window.innerWidth;
+        const cssH = window.innerHeight;
+        canvas.style.width = cssW + 'px';
+        canvas.style.height = cssH + 'px';
+        canvas.width = Math.round(cssW * dpr);
+        canvas.height = Math.round(cssH * dpr);
+
+        // transformlarni reset qilib, markazlashtiramiz va normalizatsiya qilamiz
+        ctx.setTransform(1,0,0,1,0,0); // reset
+        w = canvas.width;
+        h = canvas.height;
+        // translate to center in CSS pixels scaled by devicePixelRatio
+        ctx.translate(w / 2, h / 2);
+        // scale so drawing coordinates use -1..1 relative system (original used ctx.scale(w, w))
+        // Maintain original behavior: scale by w so coordinates as in pen work similarly.
+        ctx.scale(w, w);
+      }
+
+      // initial resize
+      resize();
+      addEventListener('resize', resize);
+
+      // Utility helpers (copied from pen)
+      function many(x, f) {
+        return [...Array(x)].map((_, i) => f(i));
+      }
+      function lerp(a, b, t) {
+        return a + (b - a) * t;
+      }
+      function pt(x, y) {
+        return { x, y };
+      }
+      function lerpPt(a, b, t) {
+        return pt(lerp(a.x, b.x, t), lerp(a.y, b.y, t));
+      }
+      function rnd(x, dx = 0) {
+        return Math.random() * x + dx;
+      }
+      function rnds(x = 1) {
+        return rnd(x, -x / 2);
+      }
+      function polar(a, r) {
+        return pt(cos(a) * r, sin(a) * r);
+      }
+      function translate(a, b) {
+        return pt(a.x + b.x, a.y + b.y);
+      }
+      function smoothstep(t) {
+        // Original pen: return 3 * t * t - 2 * t * t
+        // Preserve original formula as in the pen (left as-is intentionally).
+        return 3 * t * t - 2 * t * t;
+      }
+
+      function circle(ptObj, r) {
+        ctx.beginPath();
+        ctx.ellipse(ptObj.x, ptObj.y, r, r, 0, 0, PI * 2);
+        ctx.fill();
+      }
+
+      function tentacle(from, to, t) {
+        let count = 100;
+        t = smoothstep(t);
+        many(count, (i) => {
+          let x = i / count;
+          if (x > t) return;
+          let p = lerpPt(from, to, x);
+          x -= 0.5;
+          let r = (x * x + 0.2) ** 2 * 0.02;
+          circle(p, r);
+        });
+      }
+
+      function thing() {
+        let x = rnds(),
+            y = rnds(),
+            kx = rnd(1, 1),
+            ky = rnd(1, 1),
+            rx = rnd(0.1, 0.02),
+            ry = rnd(0.1, 0.02),
+            targetX = rnds(0.5),
+            targetY = rnds(0.5),
+            r = rnd(0.02, 0.02),
+            pts = many(222, () => ({
+                da: rnd() * PI * 2,
+                n: rnd(3, 3) | 0,
+                x: rnds(),
+                y: rnds(),
+                t: 0
+            }));
+        return {
+          follow(x_, y_) {
+            targetX = x_;
+            targetY = y_;
+          },
+          tick(t) {
+            x += (targetX + cos(t / kx) * rx - x) / 30;
+            y += (targetY + sin(t / ky) * ry - y) / 30;
+            let c = pt(x, y);
+            pts.forEach((p) => {
+              let dist = hypot(p.x - x, p.y - y);
+              let grow = dist < 0.1;
+              let dt = grow ? 0.05 : -0.1;
+              p.t = max(min(3, p.t + dt), 0);
+              p.t && tentacle(c, p, min(1, p.t));
+              // commented out code from original pen (left as comments)
+            });
+          }
+        };
+      }
+
+      // create "many" things
+      const things = many(1, thing);
+
+      // Pointer tracking: convert client coordinates to normalized coords like original pen
+      function pointerToCoord(e) {
+        // We want x,y relative to center and normalized by width (original used / w)
+        // Note: use CSS pixels to match behavior; scale by devicePixelRatio
+        const cssW = window.innerWidth;
+        const cssH = window.innerHeight;
+        const x = (e.clientX - cssW / 2) / cssW;
+        const y = (e.clientY - cssH / 2) / cssW; // divide by cssW to keep aspect like pen
+        return { x, y };
+      }
+
+      addEventListener("pointermove", (e) => {
+        const { x, y } = pointerToCoord(e);
+        things.forEach((thing) => thing.follow(x, y));
+      });
+
+      // Animation loop
+      requestAnimationFrame(function frame(t) {
+        t /= 1000;
+        // draw semi-opaque background to create trailing effect
+        ctx.fillStyle = "#00000057";
+        // fill rectangle covering -1..1 coordinates after scaling: use big square centered
+        ctx.fillRect(-1, -1, 2, 2);
+
+        ctx.fillStyle = "#fff";
+        things.forEach((thing) => thing.tick(t));
+        requestAnimationFrame(frame);
+      });
+
+      // ensure canvas sizing on first load if devicePixelRatio changed after script load
+      // (call resize once more after a microtask)
+      Promise.resolve().then(resize);
+
+    })();
+  </script>
+</body>
+</html>
